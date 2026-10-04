@@ -1,0 +1,295 @@
+From d0ac3aa8f1fb4896c82478166cff5dc529f0f49a Mon Sep 17 00:00:00 2001
+From: Individual Gather <individual.gather@noreply.local>
+Date: Sun, 4 Oct 2026 05:57:00 +0200
+Subject: [PATCH] Load custom boss module assemblies from the CustomModules
+ config folder
+
+Assemblies named BossModCustomModules in pluginConfigs/BossModReborn/CustomModules are loaded at
+startup. They are compiled with BossMod.SourceGen and get internals access, and their generated
+registries, config and enum metadata are merged into the plugin's own. Custom modules replace
+built-in ones with the same type name or primary actor OID; custom config nodes replace built-in
+ones with the same type name, so saved settings and plans carry over.
+---
+ BossMod/BossModule/BossModule.cs          |   2 +-
+ BossMod/BossModule/BossModuleRegistry.cs  |  34 +++++-
+ BossMod/BossModule/ZoneModuleRegistry.cs  |   7 +-
+ BossMod/Config/ConfigRoot.cs              |  16 ++-
+ BossMod/Config/GeneratedConfigMetadata.cs |   1 +
+ BossMod/Framework/CustomModules.cs        | 137 ++++++++++++++++++++++
+ BossMod/Util/GeneratedEnumMetadata.cs     |   1 +
+ 7 files changed, 194 insertions(+), 4 deletions(-)
+ create mode 100644 BossMod/Framework/CustomModules.cs
+
+diff --git a/BossMod/BossModule/BossModule.cs b/BossMod/BossModule/BossModule.cs
+index 121cb5745..25d8014e8 100644
+--- a/BossMod/BossModule/BossModule.cs
++++ b/BossMod/BossModule/BossModule.cs
+@@ -107,7 +107,7 @@ public abstract class BossModule : IDisposable
+             ReportError(null, $"State {StateMachine.ActiveState?.ID:X}: Activating a component of type {typeof(T)} when another of the same type is already active; old one is deactivated automatically");
+             DeactivateComponent<T>();
+         }
+-        if (!GeneratedRegistries.TryCreateBossComponent<T>(this, out var comp))
++        if (!GeneratedRegistries.TryCreateBossComponent<T>(this, out var comp) && !CustomModules.TryCreateBossComponent<T>(this, out comp))
+         {
+             throw new InvalidOperationException($"Boss component {typeof(T).FullName} was not registered by BossMod.SourceGen");
+         }
+diff --git a/BossMod/BossModule/BossModuleRegistry.cs b/BossMod/BossModule/BossModuleRegistry.cs
+index e30ffd788..e8f381195 100644
+--- a/BossMod/BossModule/BossModuleRegistry.cs
++++ b/BossMod/BossModule/BossModuleRegistry.cs
+@@ -60,7 +60,39 @@ public static class BossModuleRegistry
+     private static readonly Dictionary<Type, Info> _modulesByType = []; // [module-type] = module info
+     private static readonly Dictionary<string, Info> _modulesByName = []; // [module-type-full-name] = module info
+ 
+-    static BossModuleRegistry() => GeneratedRegistries.RegisterBossModules(Register);
++    static BossModuleRegistry()
++    {
++        GeneratedRegistries.RegisterBossModules(Register);
++        CustomModules.InvokeGenerated(nameof(GeneratedRegistries), nameof(GeneratedRegistries.RegisterBossModules), (Action<Info>)RegisterCustom);
++    }
++
++    // custom modules replace built-in ones with the same type name or primary actor OID
++    private static void RegisterCustom(Info info)
++    {
++        if (info.ModuleType.FullName is { } fullName && _modulesByName.TryGetValue(fullName, out var sameName))
++        {
++            Unregister(sameName);
++        }
++        if (RegisteredModules.TryGetValue(info.PrimaryActorOID, out var sameOID))
++        {
++            Unregister(sameOID);
++        }
++        Register(info);
++        Service.Log($"[CustomModules] Registered custom boss module {info.ModuleType.FullName}");
++    }
++
++    private static void Unregister(Info info)
++    {
++        _modulesByType.Remove(info.ModuleType);
++        if (info.ModuleType.FullName is { } fullName && _modulesByName.GetValueOrDefault(fullName) == info)
++        {
++            _modulesByName.Remove(fullName);
++        }
++        if (RegisteredModules.GetValueOrDefault(info.PrimaryActorOID) == info)
++        {
++            RegisteredModules.Remove(info.PrimaryActorOID);
++        }
++    }
+ 
+     private static void Register(Info info)
+     {
+diff --git a/BossMod/BossModule/ZoneModuleRegistry.cs b/BossMod/BossModule/ZoneModuleRegistry.cs
+index 3263437fd..25477b3d4 100644
+--- a/BossMod/BossModule/ZoneModuleRegistry.cs
++++ b/BossMod/BossModule/ZoneModuleRegistry.cs
+@@ -15,7 +15,12 @@ public static class ZoneModuleRegistry
+ 
+     private static readonly Dictionary<uint, Info> _modulesByCFC = [];
+ 
+-    static ZoneModuleRegistry() => GeneratedRegistries.RegisterZoneModules(Register);
++    static ZoneModuleRegistry()
++    {
++        GeneratedRegistries.RegisterZoneModules(Register);
++        // custom zone modules replace built-in ones for the same CFC
++        CustomModules.InvokeGenerated(nameof(GeneratedRegistries), nameof(GeneratedRegistries.RegisterZoneModules), (Action<Info>)(info => _modulesByCFC[info.Desc.CFCID] = info));
++    }
+ 
+     private static void Register(Info info)
+     {
+diff --git a/BossMod/Config/ConfigRoot.cs b/BossMod/Config/ConfigRoot.cs
+index 65dff5d52..3e5146ebe 100644
+--- a/BossMod/Config/ConfigRoot.cs
++++ b/BossMod/Config/ConfigRoot.cs
+@@ -9,7 +9,21 @@ public sealed class ConfigRoot
+     public readonly Dictionary<Type, ConfigNode> _nodes = [];
+     private readonly Dictionary<string, ConfigNode> _nodesByName = [];
+ 
+-    public void Initialize() => GeneratedRegistries.RegisterConfigNodes(RegisterNode);
++    public void Initialize()
++    {
++        GeneratedRegistries.RegisterConfigNodes(RegisterNode);
++        CustomModules.InvokeGenerated(nameof(GeneratedRegistries), nameof(GeneratedRegistries.RegisterConfigNodes), (Action<Type, ConfigNode>)RegisterCustomNode);
++    }
++
++    // custom config nodes replace built-in ones with the same type name, so their saved settings carry over
++    private void RegisterCustomNode(Type type, ConfigNode node)
++    {
++        if (type.FullName is { } fullName && _nodesByName.TryGetValue(fullName, out var existing))
++        {
++            _nodes.Remove(existing.GetType());
++        }
++        RegisterNode(type, node);
++    }
+ 
+     private void RegisterNode(Type type, ConfigNode node)
+     {
+diff --git a/BossMod/Config/GeneratedConfigMetadata.cs b/BossMod/Config/GeneratedConfigMetadata.cs
+index a4fceb3b9..8fcc501a5 100644
+--- a/BossMod/Config/GeneratedConfigMetadata.cs
++++ b/BossMod/Config/GeneratedConfigMetadata.cs
+@@ -83,6 +83,7 @@ internal static partial class GeneratedConfigMetadata
+     {
+         Dictionary<Type, ConfigTypeMetadata> result = [];
+         Register(result);
++        CustomModules.InvokeGenerated(nameof(GeneratedConfigMetadata), nameof(Register), result);
+         return result;
+     }
+ 
+diff --git a/BossMod/Framework/CustomModules.cs b/BossMod/Framework/CustomModules.cs
+new file mode 100644
+index 000000000..678934b0d
+--- /dev/null
++++ b/BossMod/Framework/CustomModules.cs
+@@ -0,0 +1,137 @@
++using System.IO;
++using System.Reflection;
++using System.Runtime.Loader;
++
++[assembly: InternalsVisibleTo(BossMod.CustomModules.AssemblyName)]
++
++namespace BossMod;
++
++// Loads boss module assemblies from the plugin config's CustomModules folder (fork addition).
++// A custom assembly must be named CustomModules.AssemblyName and compiled with BossMod.SourceGen, so it carries its own GeneratedRegistries,
++// GeneratedConfigMetadata and GeneratedEnumMetadata; their entries are merged into the plugin's own. Custom modules and config nodes replace
++// built-in ones with the same full type name or primary actor OID, so settings and plans keyed by type name keep working.
++public static class CustomModules
++{
++    public const string FolderName = "CustomModules";
++    public const string AssemblyName = "BossModCustomModules";
++
++    private static readonly System.Threading.Lock _lock = new();
++    private static Assembly[]? _assemblies;
++
++    // loaded on first use; empty (and retried later) until the plugin services are available, e.g. in headless replay tools
++    public static Assembly[] Assemblies
++    {
++        get
++        {
++            lock (_lock)
++            {
++                if (_assemblies == null && Service.PluginInterface?.ConfigDirectory is { } configDir)
++                {
++                    _assemblies = LoadAll(configDir);
++                }
++                return _assemblies ?? [];
++            }
++        }
++    }
++
++    private static Assembly[] LoadAll(DirectoryInfo configDir)
++    {
++        try
++        {
++            var dir = new DirectoryInfo(Path.Combine(configDir.FullName, FolderName));
++            if (!dir.Exists)
++            {
++                dir.Create();
++                return [];
++            }
++
++            var context = AssemblyLoadContext.GetLoadContext(typeof(CustomModules).Assembly) ?? AssemblyLoadContext.Default;
++            List<Assembly> result = [];
++            foreach (var file in dir.GetFiles("*.dll"))
++            {
++                try
++                {
++                    // load from memory, so the file stays unlocked and can be rebuilt while the game is running
++                    using var dll = new MemoryStream(File.ReadAllBytes(file.FullName));
++                    var pdbPath = Path.ChangeExtension(file.FullName, ".pdb");
++                    using var pdb = File.Exists(pdbPath) ? new MemoryStream(File.ReadAllBytes(pdbPath)) : null;
++                    var assembly = context.LoadFromStream(dll, pdb);
++                    if (assembly.GetName().Name != AssemblyName)
++                    {
++                        Service.Log($"[CustomModules] Skipping {file.FullName}: assembly name must be {AssemblyName}, otherwise it can't access plugin internals");
++                        continue;
++                    }
++                    result.Add(assembly);
++                    Service.Log($"[CustomModules] Loaded custom module assembly {assembly.GetName()} from {file.FullName}");
++                }
++                catch (Exception e)
++                {
++                    Service.Log($"[CustomModules] Failed to load {file.FullName}: {e}");
++                }
++            }
++            return [.. result];
++        }
++        catch (Exception e)
++        {
++            Service.Log($"[CustomModules] Failed to load custom modules: {e}");
++            return [];
++        }
++    }
++
++    public static bool IsCustom(Type type) => Array.IndexOf(Assemblies, type.Assembly) >= 0;
++
++    // calls a static method of a generated partial class (e.g. GeneratedRegistries.RegisterBossModules) in each custom assembly
++    internal static void InvokeGenerated(string className, string methodName, params object[] args)
++    {
++        foreach (var assembly in Assemblies)
++        {
++            var method = assembly.GetType($"BossMod.{className}")?.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
++            if (method == null)
++            {
++                continue;
++            }
++            try
++            {
++                method.Invoke(null, args);
++            }
++            catch (Exception e)
++            {
++                Service.Log($"[CustomModules] {assembly.GetName().Name}: {className}.{methodName} failed: {e}");
++            }
++        }
++    }
++
++    internal static bool TryCreateBossComponent<T>(BossModule module, out T component) where T : BossComponent
++    {
++        if (ComponentFactory<T>.Create is { } create)
++        {
++            component = create(module);
++            return true;
++        }
++        component = null!;
++        return false;
++    }
++
++    private static class ComponentFactory<T> where T : BossComponent
++    {
++        public static readonly Func<BossModule, T>? Create = Build();
++
++        private static Func<BossModule, T>? Build()
++        {
++            if (!IsCustom(typeof(T)))
++            {
++                return null;
++            }
++            var method = typeof(T).Assembly.GetType("BossMod.GeneratedRegistries")?.GetMethod("TryCreateBossComponent", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic)?.MakeGenericMethod(typeof(T));
++            if (method == null)
++            {
++                return null;
++            }
++            return module =>
++            {
++                object?[] args = [module, null];
++                return (bool)method.Invoke(null, args)! ? (T)args[1]! : throw new InvalidOperationException($"Boss component {typeof(T).FullName} was not registered by the custom module assembly");
++            };
++        }
++    }
++}
+diff --git a/BossMod/Util/GeneratedEnumMetadata.cs b/BossMod/Util/GeneratedEnumMetadata.cs
+index 10cdb8231..517c17701 100644
+--- a/BossMod/Util/GeneratedEnumMetadata.cs
++++ b/BossMod/Util/GeneratedEnumMetadata.cs
+@@ -41,6 +41,7 @@ internal static partial class GeneratedEnumMetadata
+     {
+         Dictionary<Type, Lazy<EnumMetadata>> result = [];
+         Register(result);
++        CustomModules.InvokeGenerated(nameof(GeneratedEnumMetadata), nameof(Register), result);
+         return result;
+     }
+ 
+-- 
+2.43.0
+
