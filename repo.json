@@ -1,1 +1,39 @@
-[]
+[
+  {
+    "Author": "The Combat Reborn Team (fork by IndividualGather)",
+    "Name": "BossModRebornButBetter",
+    "InternalName": "BossModReborn",
+    "AssemblyVersion": "7.5.6.2901",
+    "Description": "An unofficial fork of BossMod Reborn by The Combat Reborn Team: https://github.com/FFXIV-CombatReborn/BossmodReborn\nAll credit for the plugin goes to the original authors.\n\nWhy this fork exists: the official plugin only runs the boss modules built into it. This fork adds a single feature: it also loads boss module DLLs from the CustomModules folder in the plugin's config directory, which can add modules or replace built-in ones. That way custom versions of encounters can be maintained separately instead of in a full fork of the plugin.\n\nEverything else is unchanged. It is rebuilt automatically from every official release.\n\nNot affiliated with or supported by The Combat Reborn Team. Please don't report issues with this fork to them.",
+    "ApplicableVersion": "any",
+    "RepoUrl": "https://github.com/IndividualGather/BossModRebornButBetter",
+    "Tags": [
+      "combat",
+      "boss",
+      "dodge",
+      "mechanics",
+      "pve",
+      "raids",
+      "trials"
+    ],
+    "DalamudApiLevel": 15,
+    "LoadRequiredState": 0,
+    "LoadSync": false,
+    "CanUnloadAsync": false,
+    "LoadPriority": 0,
+    "ImageUrls": [
+      "https://raw.githubusercontent.com/FFXIV-CombatReborn/BossmodReborn/master/Data/image1.png",
+      "https://raw.githubusercontent.com/FFXIV-CombatReborn/BossmodReborn/master/Data/image2.png",
+      "https://raw.githubusercontent.com/FFXIV-CombatReborn/BossmodReborn/master/Data/image3.png"
+    ],
+    "IconUrl": "https://raw.githubusercontent.com/FFXIV-CombatReborn/RebornAssets/main/IconAssets/BMR_Icon.png",
+    "Punchline": "Don't fail at raid mechanics anymore. Loads extra boss modules from the CustomModules config folder.",
+    "AcceptsFeedback": true,
+    "DownloadLinkInstall": "https://github.com/IndividualGather/BossModRebornButBetter/releases/download/7.5.6.2901/latest.zip",
+    "DownloadLinkUpdate": "https://github.com/IndividualGather/BossModRebornButBetter/releases/download/7.5.6.2901/latest.zip",
+    "DownloadLinkTesting": "https://github.com/IndividualGather/BossModRebornButBetter/releases/download/7.5.6.2901/latest.zip",
+    "LastUpdate": 1791109933,
+    "IsHide": false,
+    "IsTestingExclusive": false
+  }
+]
