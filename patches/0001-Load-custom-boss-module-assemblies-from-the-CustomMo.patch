@@ -1,4 +1,4 @@
-From d0ac3aa8f1fb4896c82478166cff5dc529f0f49a Mon Sep 17 00:00:00 2001
+From aa841bde7dae92f2125576f88728e32ed5cdaddc Mon Sep 17 00:00:00 2001
 From: Individual Gather <individual.gather@noreply.local>
 Date: Sun, 4 Oct 2026 05:57:00 +0200
 Subject: [PATCH] Load custom boss module assemblies from the CustomModules
@@ -21,7 +21,7 @@ ones with the same type name, so saved settings and plans carry over.
  create mode 100644 BossMod/Framework/CustomModules.cs
 
 diff --git a/BossMod/BossModule/BossModule.cs b/BossMod/BossModule/BossModule.cs
-index 121cb5745..25d8014e8 100644
+index 431f699da..77d6bf46b 100644
 --- a/BossMod/BossModule/BossModule.cs
 +++ b/BossMod/BossModule/BossModule.cs
 @@ -107,7 +107,7 @@ public abstract class BossModule : IDisposable
@@ -97,12 +97,12 @@ index 3263437fd..25477b3d4 100644
      private static void Register(Info info)
      {
 diff --git a/BossMod/Config/ConfigRoot.cs b/BossMod/Config/ConfigRoot.cs
-index 65dff5d52..3e5146ebe 100644
+index db1a8cf3a..2d6105266 100644
 --- a/BossMod/Config/ConfigRoot.cs
 +++ b/BossMod/Config/ConfigRoot.cs
-@@ -9,7 +9,21 @@ public sealed class ConfigRoot
-     public readonly Dictionary<Type, ConfigNode> _nodes = [];
-     private readonly Dictionary<string, ConfigNode> _nodesByName = [];
+@@ -17,7 +17,21 @@ public sealed class ConfigRoot
+     private readonly Dictionary<(ConfigNode node, ConfigFieldMetadata field), TransientOverride> _transient = [];
+     private int _transientVersion; // incremented under the lock whenever the overrides change
  
 -    public void Initialize() => GeneratedRegistries.RegisterConfigNodes(RegisterNode);
 +    public void Initialize()
