@@ -111,8 +111,13 @@ jobs:
             -p:AssemblyVersion=$v -p:FileVersion=$v -p:PackageVersion=$v -p:InformationalVersion=$v `
             --output ..\build
           if ($LASTEXITCODE -ne 0) { throw "Build failed" }
-          # same packaging as upstream's publish workflow
-          Get-ChildItem ..\build\* -Exclude BossModReborn.*,DefaultRotationPresets.json,RebornPresets.json,PInvoke.User32.dll | Remove-Item -Force -Recurse
+          # same packaging as upstream's publish workflow: take its list of files to keep, so new runtime
+          # dependencies (e.g. RebornMaterial.dll in 7.5.7) end up in the zip without changes here
+          $publish = Get-Content .github/workflows/publish.yml -Raw
+          if ($publish -notmatch 'build\\\*\s+-Exclude\s+([^|\r\n]+?)\s*\|\s*Remove-Item') { throw "Can't find the packaging step in upstream's publish.yml" }
+          $keep = $Matches[1] -split ',' | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+          "Keeping: $($keep -join ', ')"
+          Get-ChildItem ..\build\* -Exclude $keep | Remove-Item -Force -Recurse
           Compress-Archive -Path ..\build\* -DestinationPath ..\build\latest.zip
 
       - name: Publish release
