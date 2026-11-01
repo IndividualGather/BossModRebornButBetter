@@ -1,4 +1,4 @@
-From aa841bde7dae92f2125576f88728e32ed5cdaddc Mon Sep 17 00:00:00 2001
+From 8661b2c555ca040b395df01a54a180caf8c92ca3 Mon Sep 17 00:00:00 2001
 From: Individual Gather <individual.gather@noreply.local>
 Date: Sun, 4 Oct 2026 05:57:00 +0200
 Subject: [PATCH] Load custom boss module assemblies from the CustomModules
@@ -11,13 +11,13 @@ built-in ones with the same type name or primary actor OID; custom config nodes 
 ones with the same type name, so saved settings and plans carry over.
 ---
  BossMod/BossModule/BossModule.cs          |   2 +-
- BossMod/BossModule/BossModuleRegistry.cs  |  34 +++++-
+ BossMod/BossModule/BossModuleRegistry.cs  |  34 ++++-
  BossMod/BossModule/ZoneModuleRegistry.cs  |   7 +-
- BossMod/Config/ConfigRoot.cs              |  16 ++-
+ BossMod/Config/ConfigRoot.cs              |  16 +-
  BossMod/Config/GeneratedConfigMetadata.cs |   1 +
- BossMod/Framework/CustomModules.cs        | 137 ++++++++++++++++++++++
+ BossMod/Framework/CustomModules.cs        | 171 ++++++++++++++++++++++
  BossMod/Util/GeneratedEnumMetadata.cs     |   1 +
- 7 files changed, 194 insertions(+), 4 deletions(-)
+ 7 files changed, 228 insertions(+), 4 deletions(-)
  create mode 100644 BossMod/Framework/CustomModules.cs
 
 diff --git a/BossMod/BossModule/BossModule.cs b/BossMod/BossModule/BossModule.cs
@@ -124,10 +124,10 @@ index db1a8cf3a..2d6105266 100644
      private void RegisterNode(Type type, ConfigNode node)
      {
 diff --git a/BossMod/Config/GeneratedConfigMetadata.cs b/BossMod/Config/GeneratedConfigMetadata.cs
-index a4fceb3b9..8fcc501a5 100644
+index a142c145a..d2e68171e 100644
 --- a/BossMod/Config/GeneratedConfigMetadata.cs
 +++ b/BossMod/Config/GeneratedConfigMetadata.cs
-@@ -83,6 +83,7 @@ internal static partial class GeneratedConfigMetadata
+@@ -84,6 +84,7 @@ internal static partial class GeneratedConfigMetadata
      {
          Dictionary<Type, ConfigTypeMetadata> result = [];
          Register(result);
@@ -137,10 +137,10 @@ index a4fceb3b9..8fcc501a5 100644
  
 diff --git a/BossMod/Framework/CustomModules.cs b/BossMod/Framework/CustomModules.cs
 new file mode 100644
-index 000000000..678934b0d
+index 000000000..0d060c8c0
 --- /dev/null
 +++ b/BossMod/Framework/CustomModules.cs
-@@ -0,0 +1,137 @@
+@@ -0,0 +1,171 @@
 +using System.IO;
 +using System.Reflection;
 +using System.Runtime.Loader;
@@ -201,25 +201,59 @@ index 000000000..678934b0d
 +                    var assembly = context.LoadFromStream(dll, pdb);
 +                    if (assembly.GetName().Name != AssemblyName)
 +                    {
-+                        Service.Log($"[CustomModules] Skipping {file.FullName}: assembly name must be {AssemblyName}, otherwise it can't access plugin internals");
++                        LogError($"Skipping {file.FullName}: assembly name must be {AssemblyName}, otherwise it can't access plugin internals");
 +                        continue;
 +                    }
++                    Validate(assembly);
 +                    result.Add(assembly);
-+                    Service.Log($"[CustomModules] Loaded custom module assembly {assembly.GetName()} from {file.FullName}");
++                    LogInfo($"Loaded custom module assembly {assembly.GetName()} from {file.FullName}");
 +                }
 +                catch (Exception e)
 +                {
-+                    Service.Log($"[CustomModules] Failed to load {file.FullName}: {e}");
++                    // a partially working assembly (e.g. modules registered, but their config metadata missing) breaks plugin startup, so reject it as a whole
++                    LogError($"Ignoring {file.FullName}, built-in modules are used instead. It was probably built against a different plugin version; rebuild it against the installed one. {e}");
 +                }
 +            }
 +            return [.. result];
 +        }
 +        catch (Exception e)
 +        {
-+            Service.Log($"[CustomModules] Failed to load custom modules: {e}");
++            LogError($"Failed to load custom modules: {e}");
 +            return [];
 +        }
 +    }
++
++    // runs everything the plugin later calls in the assembly's generated code, so binary incompatibilities with this plugin version show up
++    // here (as MissingMethodException, TypeLoadException etc.) instead of halfway through plugin startup
++    private static void Validate(Assembly assembly)
++    {
++        assembly.GetTypes();
++        void Call(string className, string methodName, params object[] args)
++        {
++            var method = assembly.GetType($"BossMod.{className}")?.GetMethod(methodName, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
++            try
++            {
++                method?.Invoke(null, args);
++            }
++            catch (TargetInvocationException e) when (e.InnerException != null)
++            {
++                throw e.InnerException;
++            }
++        }
++        Call(nameof(GeneratedRegistries), nameof(GeneratedRegistries.RegisterBossModules), (Action<BossModuleRegistry.Info>)(_ => { }));
++        Call(nameof(GeneratedRegistries), nameof(GeneratedRegistries.RegisterZoneModules), (Action<ZoneModuleRegistry.Info>)(_ => { }));
++        Call(nameof(GeneratedRegistries), nameof(GeneratedRegistries.RegisterConfigNodes), (Action<Type, ConfigNode>)((_, _) => { }));
++        Call(nameof(GeneratedConfigMetadata), "Register", new Dictionary<Type, ConfigTypeMetadata>());
++        var enums = new Dictionary<Type, Lazy<EnumMetadata>>();
++        Call(nameof(GeneratedEnumMetadata), "Register", enums);
++        foreach (var e in enums.Values)
++        {
++            _ = e.Value;
++        }
++    }
++
++    private static void LogInfo(string msg) => Service.Logger?.Information($"[CustomModules] {msg}");
++    private static void LogError(string msg) => Service.Logger?.Error($"[CustomModules] {msg}");
 +
 +    public static bool IsCustom(Type type) => Array.IndexOf(Assemblies, type.Assembly) >= 0;
 +
@@ -239,7 +273,7 @@ index 000000000..678934b0d
 +            }
 +            catch (Exception e)
 +            {
-+                Service.Log($"[CustomModules] {assembly.GetName().Name}: {className}.{methodName} failed: {e}");
++                LogError($"{assembly.GetName().Name}: {className}.{methodName} failed: {e}");
 +            }
 +        }
 +    }
