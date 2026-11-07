@@ -1,0 +1,94 @@
+From b72b217ff6086ed2b071eb9c7bd68a7fcf5dace5 Mon Sep 17 00:00:00 2001
+From: Individual Gather <individual.gather@noreply.local>
+Date: Sat, 7 Nov 2026 10:12:38 +0100
+Subject: [PATCH 2/2] Let custom assemblies hook plugin startup/shutdown
+ (CustomPlugin.Initialize)
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ BossMod/Framework/CustomModules.cs | 48 ++++++++++++++++++++++++++++++
+ BossMod/Framework/Plugin.cs        |  2 ++
+ 2 files changed, 50 insertions(+)
+
+diff --git a/BossMod/Framework/CustomModules.cs b/BossMod/Framework/CustomModules.cs
+index 0d060c8c0..8f013e3e7 100644
+--- a/BossMod/Framework/CustomModules.cs
++++ b/BossMod/Framework/CustomModules.cs
+@@ -109,6 +109,54 @@ public static class CustomModules
+         }
+     }
+ 
++    // Lifecycle hook: a custom assembly may define `static class BossMod.CustomPlugin` with
++    // `static IDisposable? Initialize(WorldState ws, BossModuleManager bossModules, ZoneModuleManager zoneModules)`.
++    // It is called once after the plugin's own windows exist, so custom code can add its own windows/services;
++    // the returned object is disposed on plugin shutdown. Only existing plugin types appear in the signature,
++    // so a custom assembly doesn't need a plugin build that has this hook to compile.
++    private static readonly List<IDisposable> _plugins = [];
++
++    internal static void InitializePlugins(WorldState ws, BossModuleManager bossModules, ZoneModuleManager zoneModules)
++    {
++        foreach (var assembly in Assemblies)
++        {
++            var method = assembly.GetType("BossMod.CustomPlugin")?.GetMethod("Initialize", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic,
++                [typeof(WorldState), typeof(BossModuleManager), typeof(ZoneModuleManager)]);
++            if (method == null)
++            {
++                continue;
++            }
++            try
++            {
++                if (method.Invoke(null, [ws, bossModules, zoneModules]) is IDisposable plugin)
++                {
++                    _plugins.Add(plugin);
++                }
++                LogInfo($"{assembly.GetName().Name}: CustomPlugin initialized");
++            }
++            catch (Exception e)
++            {
++                LogError($"{assembly.GetName().Name}: CustomPlugin.Initialize failed: {e}");
++            }
++        }
++    }
++
++    internal static void DisposePlugins()
++    {
++        for (var i = _plugins.Count - 1; i >= 0; --i)
++        {
++            try
++            {
++                _plugins[i].Dispose();
++            }
++            catch (Exception e)
++            {
++                LogError($"CustomPlugin dispose failed: {e}");
++            }
++        }
++        _plugins.Clear();
++    }
++
+     private static void LogInfo(string msg) => Service.Logger?.Information($"[CustomModules] {msg}");
+     private static void LogError(string msg) => Service.Logger?.Error($"[CustomModules] {msg}");
+ 
+diff --git a/BossMod/Framework/Plugin.cs b/BossMod/Framework/Plugin.cs
+index de27154b0..fa9b82353 100644
+--- a/BossMod/Framework/Plugin.cs
++++ b/BossMod/Framework/Plugin.cs
+@@ -145,6 +145,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
+         config.Modified.ExecuteAndSubscribe(() => _wndReplay.UpdateLogDirectory());
+         _wndRotation = new(_rotation, _amex, () => OpenConfigUI("Autorotation presets"));
+         _wndDebug = new(_ws, _rotation, _zonemod, _amex, _movementOverride, _hintsBuilder, _dalamud, _rsr);
++        CustomModules.InitializePlugins(_ws, _bossmod, _zonemod); // fork addition
+         RebornUI.MaterialUI.Start(_dalamud, _ws, _rotationDB, _rotation, _ai, new DirectoryInfo(replayDir));
+ 
+         _dalamud.UiBuilder.DisableAutomaticUiHide = true;
+@@ -158,6 +159,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
+         await Service.Framework.RunOnFrameworkThread(() =>
+         {
+             _dalamud.UiBuilder.Draw -= DrawUI;
++            CustomModules.DisposePlugins(); // fork addition
+             Service.Condition.ConditionChange -= OnConditionChanged;
+             Dx11ArenaRenderer.SetWorldOverlayNode(null);
+             _worldOverlayNode?.Dispose();
+-- 
+2.43.0
+

@@ -1,7 +1,7 @@
-From 8661b2c555ca040b395df01a54a180caf8c92ca3 Mon Sep 17 00:00:00 2001
+From beac397c91fdfb243b2d66a57871a463f1ef62bb Mon Sep 17 00:00:00 2001
 From: Individual Gather <individual.gather@noreply.local>
 Date: Sun, 4 Oct 2026 05:57:00 +0200
-Subject: [PATCH] Load custom boss module assemblies from the CustomModules
+Subject: [PATCH 1/2] Load custom boss module assemblies from the CustomModules
  config folder
 
 Assemblies named BossModCustomModules in pluginConfigs/BossModReborn/CustomModules are loaded at
