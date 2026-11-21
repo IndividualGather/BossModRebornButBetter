@@ -1,4 +1,4 @@
-From b72b217ff6086ed2b071eb9c7bd68a7fcf5dace5 Mon Sep 17 00:00:00 2001
+From c1b7af7361f54452aed67f423abb3961db746a28 Mon Sep 17 00:00:00 2001
 From: Individual Gather <individual.gather@noreply.local>
 Date: Sat, 7 Nov 2026 10:12:38 +0100
 Subject: [PATCH 2/2] Let custom assemblies hook plugin startup/shutdown
@@ -70,18 +70,18 @@ index 0d060c8c0..8f013e3e7 100644
      private static void LogError(string msg) => Service.Logger?.Error($"[CustomModules] {msg}");
  
 diff --git a/BossMod/Framework/Plugin.cs b/BossMod/Framework/Plugin.cs
-index de27154b0..fa9b82353 100644
+index 180cd1fad..5cdc89f76 100644
 --- a/BossMod/Framework/Plugin.cs
 +++ b/BossMod/Framework/Plugin.cs
-@@ -145,6 +145,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
-         config.Modified.ExecuteAndSubscribe(() => _wndReplay.UpdateLogDirectory());
+@@ -147,6 +147,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
+         _configUI = new(Service.Config, _ws, new DirectoryInfo(replayDir), _rotationDB);
          _wndRotation = new(_rotation, _amex, () => OpenConfigUI("Autorotation presets"));
          _wndDebug = new(_ws, _rotation, _zonemod, _amex, _movementOverride, _hintsBuilder, _dalamud, _rsr);
 +        CustomModules.InitializePlugins(_ws, _bossmod, _zonemod); // fork addition
          RebornUI.MaterialUI.Start(_dalamud, _ws, _rotationDB, _rotation, _ai, new DirectoryInfo(replayDir));
  
          _dalamud.UiBuilder.DisableAutomaticUiHide = true;
-@@ -158,6 +159,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
+@@ -160,6 +161,7 @@ public sealed class Plugin : IAsyncDalamudPlugin
          await Service.Framework.RunOnFrameworkThread(() =>
          {
              _dalamud.UiBuilder.Draw -= DrawUI;
@@ -90,5 +90,5 @@ index de27154b0..fa9b82353 100644
              Dx11ArenaRenderer.SetWorldOverlayNode(null);
              _worldOverlayNode?.Dispose();
 -- 
-2.43.0
+2.45.1.windows.1
 
